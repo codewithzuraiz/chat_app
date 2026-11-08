@@ -36,6 +36,7 @@ class _CreateGroupScreenState extends State<CreateGroupScreen> {
   @override
   void initState() {
     super.initState();
+    _chatService.ensureDefaultUsersSeeded();
     _subscribeUsers();
     _searchController.addListener(_filterUsers);
   }
@@ -51,15 +52,22 @@ class _CreateGroupScreenState extends State<CreateGroupScreen> {
 
   void _subscribeUsers() {
     final currentUid = FirebaseAuth.instance.currentUser?.uid ?? '';
-    _usersSub = _chatService.streamAllUsers(currentUid).listen((users) {
-      if (mounted) {
-        setState(() {
-          _allUsers = users;
-          _filterUsers();
-          _isLoadingUsers = false;
-        });
-      }
-    });
+    _usersSub = _chatService.streamAllUsers(currentUid).listen(
+      (users) {
+        if (mounted) {
+          setState(() {
+            _allUsers = users;
+            _filterUsers();
+            _isLoadingUsers = false;
+          });
+        }
+      },
+      onError: (_) {
+        if (mounted) {
+          setState(() => _isLoadingUsers = false);
+        }
+      },
+    );
   }
 
   void _filterUsers() {

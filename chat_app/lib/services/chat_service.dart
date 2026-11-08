@@ -1,8 +1,13 @@
 import 'dart:io';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_storage/firebase_storage.dart';
+import 'package:flutter/foundation.dart';
+import '../firebase_options.dart';
 import '../models/chat_model.dart';
 import '../models/user_model.dart';
+import 'auth_service.dart';
 
 class ChatService {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
@@ -115,13 +120,112 @@ class ChatService {
     }
   }
 
+  /// Ensure initial users (Orvex Tech Solutions and demo contacts) exist in Firestore
+  Future<void> ensureDefaultUsersSeeded() async {
+    try {
+      final usersSnap = await _firestore.collection('users').get();
+      final hasOrvex = usersSnap.docs.any(
+        (doc) {
+          final data = doc.data();
+          final email = (data['email'] as String? ?? '').toLowerCase();
+          return email == AuthService.orvexEmail || doc.id == 'orvex_tech_official';
+        },
+      );
+
+      if (!hasOrvex) {
+        String orvexUid = 'orvex_tech_official';
+        try {
+          final tempApp = await Firebase.initializeApp(
+            name: 'OrvexSeedApp_${DateTime.now().millisecondsSinceEpoch}',
+            options: DefaultFirebaseOptions.currentPlatform,
+          );
+          final tempAuth = FirebaseAuth.instanceFor(app: tempApp);
+          UserCredential cred;
+          try {
+            cred = await tempAuth.signInWithEmailAndPassword(
+              email: AuthService.orvexEmail,
+              password: AuthService.orvexPassword,
+            );
+          } on FirebaseAuthException catch (e) {
+            if (e.code == 'user-not-found' || e.code == 'invalid-credential') {
+              cred = await tempAuth.createUserWithEmailAndPassword(
+                email: AuthService.orvexEmail,
+                password: AuthService.orvexPassword,
+              );
+            } else {
+              rethrow;
+            }
+          }
+          if (cred.user != null) {
+            orvexUid = cred.user!.uid;
+            await cred.user!.updateDisplayName('Orvex Tech Solutions');
+          }
+          await tempApp.delete();
+        } catch (_) {}
+
+        await _firestore.collection('users').doc(orvexUid).set({
+          'uid': orvexUid,
+          'name': 'Orvex Tech Solutions',
+          'email': AuthService.orvexEmail,
+          'photoUrl':
+              'https://ui-avatars.com/api/?name=Orvex+Tech&background=1B5E20&color=fff&size=256',
+          'bio':
+              'Official Account of Orvex Tech Solutions. We craft next-generation mobile apps, modern web platforms, and intelligent software systems.',
+          'statusMessage': 'Transforming ideas into digital reality 🚀',
+          'isOnline': true,
+          'lastSeen': FieldValue.serverTimestamp(),
+          'createdAt': FieldValue.serverTimestamp(),
+        }, SetOptions(merge: true));
+      }
+
+      // If database has very few users, also add demo contacts so users can test immediately
+      if (usersSnap.docs.length < 2) {
+        await _firestore.collection('users').doc('ayesha_khan_dev').set({
+          'uid': 'ayesha_khan_dev',
+          'name': 'Ayesha Khan',
+          'email': 'ayesha.khan@example.com',
+          'photoUrl':
+              'https://ui-avatars.com/api/?name=Ayesha+Khan&background=2E7D32&color=fff&size=256',
+          'bio': 'Flutter Developer & UI/UX enthusiast ✨',
+          'statusMessage': 'Building beautiful cross-platform apps 📱',
+          'isOnline': true,
+          'lastSeen': FieldValue.serverTimestamp(),
+          'createdAt': FieldValue.serverTimestamp(),
+        }, SetOptions(merge: true));
+
+        await _firestore.collection('users').doc('hamza_ali_dev').set({
+          'uid': 'hamza_ali_dev',
+          'name': 'Hamza Ali',
+          'email': 'hamza.ali@example.com',
+          'photoUrl':
+              'https://ui-avatars.com/api/?name=Hamza+Ali&background=388E3C&color=fff&size=256',
+          'bio': 'Mobile App Architect & Cloud Specialist.',
+          'statusMessage': 'Available for quick chat ☕',
+          'isOnline': false,
+          'lastSeen': FieldValue.serverTimestamp(),
+          'createdAt': FieldValue.serverTimestamp(),
+        }, SetOptions(merge: true));
+      }
+    } catch (e) {
+      debugPrint('ensureDefaultUsersSeeded error: $e');
+    }
+  }
+
   /// Real-time stream of registered users (excluding current user)
   Stream<List<UserModel>> streamAllUsers(String currentUserId) {
     return _firestore.collection('users').snapshots().map((snapshot) {
-      return snapshot.docs
-          .where((doc) => doc.id != currentUserId)
-          .map((doc) => UserModel.fromDocument(doc))
-          .toList();
+      final List<UserModel> users = [];
+      for (var doc in snapshot.docs) {
+        if (doc.id == currentUserId) continue;
+        final data = doc.data();
+        if (data['uid'] == currentUserId) continue;
+        try {
+          users.add(UserModel.fromDocument(doc));
+        } catch (e) {
+          debugPrint('Error parsing user doc ${doc.id}: $e');
+        }
+      }
+      return users;
     });
   }
 
@@ -129,10 +233,16 @@ class ChatService {
   Future<List<UserModel>> getAllUsers(String currentUserId) async {
     try {
       final snapshot = await _firestore.collection('users').get();
-      return snapshot.docs
-          .where((doc) => doc.id != currentUserId)
-          .map((doc) => UserModel.fromDocument(doc))
-          .toList();
+      final List<UserModel> users = [];
+      for (var doc in snapshot.docs) {
+        if (doc.id == currentUserId) continue;
+        final data = doc.data();
+        if (data['uid'] == currentUserId) continue;
+        try {
+          users.add(UserModel.fromDocument(doc));
+        } catch (_) {}
+      }
+      return users;
     } catch (_) {
       return [];
     }

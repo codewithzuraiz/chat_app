@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../../services/auth_service.dart';
 import '../../theme/app_theme.dart';
+import '../dashboard/main_dashboard.dart';
 import 'forgot_password_screen.dart';
 import 'phone_login_screen.dart';
 import 'signup_screen.dart';
@@ -24,12 +25,37 @@ class _LoginScreenState extends State<LoginScreen> {
   bool _obscurePassword = true;
   bool _isLoading = false;
   bool _isGoogleLoading = false;
+  bool _isOrvexLoading = false;
 
   @override
   void dispose() {
     _emailController.dispose();
     _passwordController.dispose();
     super.dispose();
+  }
+
+  Future<void> _handleOrvexLogin() async {
+    setState(() => _isOrvexLoading = true);
+    try {
+      await _authService.loginAsOrvex();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Logged in as Orvex Tech Solutions 🚀'),
+          backgroundColor: AppTheme.primaryColor,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      Navigator.pushAndRemoveUntil(
+        context,
+        MaterialPageRoute(builder: (_) => const MainDashboard()),
+        (route) => false,
+      );
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _isOrvexLoading = false);
+      _showErrorSnackBar(AuthService.getReadableErrorMessage(e));
+    }
   }
 
   Future<void> _handleEmailLogin() async {
@@ -275,6 +301,59 @@ class _LoginScreenState extends State<LoginScreen> {
                   // Phone Number Sign-In Button
                   SocialAuthButton.phone(
                     onPressed: _handlePhoneLogin,
+                  ),
+                  const SizedBox(height: 12),
+
+                  // Quick Login as Orvex Tech Solutions Button
+                  OutlinedButton.icon(
+                    style: OutlinedButton.styleFrom(
+                      minimumSize: const Size.fromHeight(50),
+                      side: const BorderSide(color: AppTheme.primaryColor, width: 1.2),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(14),
+                      ),
+                      backgroundColor: AppTheme.primaryContainer.withValues(alpha: 0.35),
+                    ),
+                    icon: _isOrvexLoading
+                        ? const SizedBox(
+                            width: 18,
+                            height: 18,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: AppTheme.primaryColor,
+                            ),
+                          )
+                        : Container(
+                            width: 24,
+                            height: 24,
+                            decoration: const BoxDecoration(
+                              gradient: LinearGradient(
+                                colors: [Color(0xFF1B5E20), Color(0xFF2E7D32)],
+                              ),
+                              shape: BoxShape.circle,
+                            ),
+                            child: const Center(
+                              child: Text(
+                                'O',
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.w900,
+                                  fontSize: 13,
+                                ),
+                              ),
+                            ),
+                          ),
+                    label: Text(
+                      _isOrvexLoading
+                          ? 'Logging in to Orvex...'
+                          : 'Quick Login as Orvex Tech',
+                      style: const TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.bold,
+                        color: AppTheme.primaryColor,
+                      ),
+                    ),
+                    onPressed: _isOrvexLoading ? null : _handleOrvexLogin,
                   ),
                   const SizedBox(height: 32),
 

@@ -12,7 +12,7 @@ import '../auth/auth_gate.dart';
 import '../chat/chat_screen.dart';
 import '../chat/new_chat_dialog.dart';
 import '../groups/create_group_screen.dart';
-import '../orvex/orvex_account_screen.dart';
+import '../orvex/orvex_login_sheet.dart';
 import '../profile/edit_profile_screen.dart';
 import '../settings/privacy_settings_screen.dart';
 
@@ -89,6 +89,12 @@ class _ChatsTabState extends State<ChatsTab> {
   final ChatService _chatService = ChatService();
   final String _currentUid = FirebaseAuth.instance.currentUser?.uid ?? '';
 
+  @override
+  void initState() {
+    super.initState();
+    _chatService.ensureDefaultUsersSeeded();
+  }
+
   Future<void> _startChatWithUser(UserModel peerUser) async {
     final currentFirebaseUser = FirebaseAuth.instance.currentUser;
     if (currentFirebaseUser == null) return;
@@ -128,16 +134,9 @@ class _ChatsTabState extends State<ChatsTab> {
           padding: const EdgeInsets.only(left: 12),
           child: Center(
             child: Tooltip(
-              message: 'Orvex Tech Solutions',
+              message: 'Login as Orvex Tech Solutions',
               child: InkWell(
-                onTap: () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (_) => const OrvexAccountScreen(),
-                    ),
-                  );
-                },
+                onTap: () => OrvexLoginSheet.show(context),
                 borderRadius: BorderRadius.circular(20),
                 child: Container(
                   width: 38,

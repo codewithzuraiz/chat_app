@@ -11,6 +11,10 @@ class AuthService {
   static const String _webClientId =
       '456732466987-im6n75po4rff64pmmrvsi8veb6p34upc.apps.googleusercontent.com';
 
+  // Official Orvex Account Credentials
+  static const String orvexEmail = 'contact@orvextech.com';
+  static const String orvexPassword = 'OrvexTech@2026';
+
   final GoogleSignIn _googleSignIn = GoogleSignIn(
     serverClientId: _webClientId,
     scopes: ['email', 'profile'],
@@ -75,10 +79,7 @@ class AuthService {
 
       final user = credential.user;
       if (user != null) {
-        // Update last active timestamp
-        await _firestore.collection('users').doc(user.uid).set({
-          'lastActive': FieldValue.serverTimestamp(),
-        }, SetOptions(merge: true));
+        await _saveUserToFirestore(user);
       }
 
       return credential;
@@ -90,6 +91,55 @@ class AuthService {
         message: e.toString(),
       );
     }
+  }
+
+  /// Sign in or Register the official Orvex Tech Solutions account
+  Future<UserCredential> loginAsOrvex() async {
+    UserCredential credential;
+    try {
+      credential = await _auth.signInWithEmailAndPassword(
+        email: orvexEmail,
+        password: orvexPassword,
+      );
+    } on FirebaseAuthException catch (e) {
+      if (e.code == 'user-not-found' ||
+          e.code == 'invalid-credential' ||
+          e.code == 'wrong-password') {
+        try {
+          credential = await _auth.createUserWithEmailAndPassword(
+            email: orvexEmail,
+            password: orvexPassword,
+          );
+        } on FirebaseAuthException {
+          credential = await _auth.signInWithEmailAndPassword(
+            email: orvexEmail,
+            password: orvexPassword,
+          );
+        }
+      } else {
+        rethrow;
+      }
+    }
+
+    final user = credential.user;
+    if (user != null) {
+      await user.updateDisplayName('Orvex Tech Solutions');
+      await _firestore.collection('users').doc(user.uid).set({
+        'uid': user.uid,
+        'name': 'Orvex Tech Solutions',
+        'email': orvexEmail,
+        'photoUrl':
+            'https://ui-avatars.com/api/?name=Orvex+Tech&background=1B5E20&color=fff&size=256',
+        'bio':
+            'Official Account of Orvex Tech Solutions. We craft next-generation mobile apps, modern web platforms, and intelligent software systems.',
+        'statusMessage': 'Transforming ideas into digital reality 🚀',
+        'isOnline': true,
+        'lastSeen': FieldValue.serverTimestamp(),
+        'createdAt': FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
+    }
+
+    return credential;
   }
 
   /// Google Sign-In with native GoogleSignIn and Firebase Credential
@@ -211,13 +261,21 @@ class AuthService {
   /// Helper to store / sync user profile in Firestore
   Future<void> _saveUserToFirestore(User? user) async {
     if (user == null) return;
+    final displayName =
+        (user.displayName != null && user.displayName!.isNotEmpty)
+            ? user.displayName!
+            : (user.email?.split('@').first ?? 'User');
+
     await _firestore.collection('users').doc(user.uid).set({
       'uid': user.uid,
-      'name': user.displayName ?? 'User',
+      'name': displayName,
       'email': user.email ?? '',
       'phoneNumber': user.phoneNumber ?? '',
       'photoUrl': user.photoURL ?? '',
+      'statusMessage': 'Hey there! I am using ChatApp',
+      'isOnline': true,
       'lastActive': FieldValue.serverTimestamp(),
+      'lastSeen': FieldValue.serverTimestamp(),
     }, SetOptions(merge: true));
   }
 

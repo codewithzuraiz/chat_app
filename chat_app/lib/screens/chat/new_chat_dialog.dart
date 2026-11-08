@@ -35,6 +35,7 @@ class _NewChatSheetState extends State<NewChatSheet> {
   @override
   void initState() {
     super.initState();
+    _chatService.ensureDefaultUsersSeeded();
     _subscribeUsers();
     _searchController.addListener(_filter);
   }
@@ -48,15 +49,22 @@ class _NewChatSheetState extends State<NewChatSheet> {
 
   void _subscribeUsers() {
     final currentUid = FirebaseAuth.instance.currentUser?.uid ?? '';
-    _usersSub = _chatService.streamAllUsers(currentUid).listen((users) {
-      if (mounted) {
-        setState(() {
-          _allUsers = users;
-          _filter();
-          _isLoading = false;
-        });
-      }
-    });
+    _usersSub = _chatService.streamAllUsers(currentUid).listen(
+      (users) {
+        if (mounted) {
+          setState(() {
+            _allUsers = users;
+            _filter();
+            _isLoading = false;
+          });
+        }
+      },
+      onError: (_) {
+        if (mounted) {
+          setState(() => _isLoading = false);
+        }
+      },
+    );
   }
 
   void _filter() {
