@@ -1,7 +1,7 @@
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import '../../theme/app_theme.dart';
-import '../home/home_screen.dart';
+import '../dashboard/main_dashboard.dart';
 import 'login_screen.dart';
 
 class AuthGate extends StatelessWidget {
@@ -24,9 +24,9 @@ class AuthGate extends StatelessWidget {
           );
         }
 
-        // If user is authenticated, route to HomeScreen
+        // If user is authenticated, route to MainDashboard
         if (snapshot.hasData && snapshot.data != null) {
-          return const HomeScreen();
+          return const MainDashboard();
         }
 
         // Otherwise, route to LoginScreen

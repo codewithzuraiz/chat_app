@@ -22,8 +22,8 @@ class OtpScreen extends StatefulWidget {
 }
 
 class _OtpScreenState extends State<OtpScreen> {
-  final int _otpLength = 6;
-  late List<TextEditingController> _controllers;
+    final int _otpLength = 6;
+    late List<TextEditingController> _controllers;
   late List<FocusNode> _focusNodes;
   final AuthService _authService = AuthService();
 
