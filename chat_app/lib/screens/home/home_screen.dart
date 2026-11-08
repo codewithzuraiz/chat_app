@@ -5,6 +5,7 @@ import '../../services/auth_service.dart';
 import '../../services/presence_service.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/presence_widgets.dart';
+import '../auth/auth_gate.dart';
 import '../profile/edit_profile_screen.dart';
 import '../settings/privacy_settings_screen.dart';
 
@@ -29,6 +30,11 @@ class HomeScreen extends StatelessWidget {
                 MaterialPageRoute(builder: (_) => const PrivacySettingsScreen()),
               );
             },
+          ),
+          IconButton(
+            tooltip: 'Log Out',
+            icon: const Icon(Icons.logout_rounded, color: AppTheme.textPrimary),
+            onPressed: () => _confirmSignOut(context),
           ),
           PopupMenuButton<String>(
             icon: const Icon(Icons.more_vert_rounded, color: AppTheme.textPrimary),
@@ -367,9 +373,20 @@ class HomeScreen extends StatelessWidget {
           ElevatedButton(
             onPressed: () async {
               Navigator.pop(dialogCtx);
-              // Set offline status before signing out
-              await PresenceService().setOffline();
+
+              // 1. Mark presence offline without blocking signout
+              PresenceService().setOffline().catchError((_) {});
+
+              // 2. Perform sign out
               await AuthService().signOut();
+
+              // 3. Clear entire navigation stack and route to AuthGate
+              if (context.mounted) {
+                Navigator.of(context).pushAndRemoveUntil(
+                  MaterialPageRoute(builder: (_) => const AuthGate()),
+                  (route) => false,
+                );
+              }
             },
             style: ElevatedButton.styleFrom(
               backgroundColor: AppTheme.errorColor,

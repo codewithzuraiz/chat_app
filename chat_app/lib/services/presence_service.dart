@@ -79,7 +79,7 @@ class PresenceService with WidgetsBindingObserver {
       await _firestore.collection('users').doc(user.uid).set({
         'isOnline': false,
         'lastSeen': FieldValue.serverTimestamp(),
-      }, SetOptions(merge: true));
+      }, SetOptions(merge: true)).timeout(const Duration(milliseconds: 1500));
     } catch (_) {}
   }
 
