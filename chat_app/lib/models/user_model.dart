@@ -60,6 +60,8 @@ class UserModel {
   final DateTime? lastSeen;
   final PrivacySettings privacy;
 
+  String get lastSeenPrivacy => privacy.lastSeen;
+
   const UserModel({
     required this.uid,
     required this.name,

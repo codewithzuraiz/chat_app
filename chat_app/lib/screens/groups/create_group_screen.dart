@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
@@ -7,6 +8,7 @@ import '../../services/chat_service.dart';
 import '../../theme/app_theme.dart';
 import '../auth/widgets/custom_text_field.dart';
 import '../auth/widgets/primary_button.dart';
+import '../chat/chat_screen.dart';
 
 class CreateGroupScreen extends StatefulWidget {
   const CreateGroupScreen({super.key});
@@ -19,36 +21,57 @@ class _CreateGroupScreenState extends State<CreateGroupScreen> {
   final _formKey = GlobalKey<FormState>();
   final _nameController = TextEditingController();
   final _descriptionController = TextEditingController();
+  final _searchController = TextEditingController();
   final ChatService _chatService = ChatService();
   final ImagePicker _picker = ImagePicker();
 
   File? _groupIcon;
-  List<UserModel> _availableUsers = [];
+  List<UserModel> _allUsers = [];
+  List<UserModel> _filteredUsers = [];
   final Set<String> _selectedUserIds = {};
   bool _isLoadingUsers = true;
   bool _isCreating = false;
+  StreamSubscription? _usersSub;
 
   @override
   void initState() {
     super.initState();
-    _fetchUsers();
+    _subscribeUsers();
+    _searchController.addListener(_filterUsers);
   }
 
   @override
   void dispose() {
+    _usersSub?.cancel();
     _nameController.dispose();
     _descriptionController.dispose();
+    _searchController.dispose();
     super.dispose();
   }
 
-  Future<void> _fetchUsers() async {
+  void _subscribeUsers() {
     final currentUid = FirebaseAuth.instance.currentUser?.uid ?? '';
-    final users = await _chatService.getAllUsers(currentUid);
-    if (mounted) {
-      setState(() {
-        _availableUsers = users;
-        _isLoadingUsers = false;
-      });
+    _usersSub = _chatService.streamAllUsers(currentUid).listen((users) {
+      if (mounted) {
+        setState(() {
+          _allUsers = users;
+          _filterUsers();
+          _isLoadingUsers = false;
+        });
+      }
+    });
+  }
+
+  void _filterUsers() {
+    final query = _searchController.text.toLowerCase().trim();
+    if (query.isEmpty) {
+      _filteredUsers = List.from(_allUsers);
+    } else {
+      _filteredUsers = _allUsers
+          .where((u) =>
+              u.name.toLowerCase().contains(query) ||
+              u.email.toLowerCase().contains(query))
+          .toList();
     }
   }
 
@@ -86,7 +109,7 @@ class _CreateGroupScreenState extends State<CreateGroupScreen> {
     setState(() => _isCreating = true);
 
     try {
-      await _chatService.createGroup(
+      final group = await _chatService.createGroup(
         name: _nameController.text.trim(),
         description: _descriptionController.text.trim(),
         iconFile: _groupIcon,
@@ -95,6 +118,7 @@ class _CreateGroupScreenState extends State<CreateGroupScreen> {
       );
 
       if (!mounted) return;
+
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('Group created successfully!'),
@@ -102,7 +126,20 @@ class _CreateGroupScreenState extends State<CreateGroupScreen> {
           behavior: SnackBarBehavior.floating,
         ),
       );
-      Navigator.pop(context, true);
+
+      // Navigate directly into the newly created group chat
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(
+          builder: (_) => ChatScreen(
+            chatId: group.id,
+            title: group.name,
+            photoUrl: group.iconUrl,
+            isGroup: true,
+            memberCount: group.members.length,
+          ),
+        ),
+      );
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -209,7 +246,7 @@ class _CreateGroupScreenState extends State<CreateGroupScreen> {
                 ),
                 const SizedBox(height: 24),
 
-                // Selected Members Section
+                // Selected Members Chips Section
                 if (_selectedUserIds.isNotEmpty) ...[
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -238,9 +275,10 @@ class _CreateGroupScreenState extends State<CreateGroupScreen> {
                     child: ListView(
                       scrollDirection: Axis.horizontal,
                       children: _selectedUserIds.map((uid) {
-                        final user = _availableUsers.firstWhere(
+                        final user = _allUsers.firstWhere(
                           (u) => u.uid == uid,
-                          orElse: () => UserModel(uid: uid, name: 'User', email: ''),
+                          orElse: () =>
+                              UserModel(uid: uid, name: 'User', email: ''),
                         );
                         return Padding(
                           padding: const EdgeInsets.only(right: 12),
@@ -271,7 +309,8 @@ class _CreateGroupScreenState extends State<CreateGroupScreen> {
                                     right: -2,
                                     child: GestureDetector(
                                       onTap: () {
-                                        setState(() => _selectedUserIds.remove(uid));
+                                        setState(
+                                            () => _selectedUserIds.remove(uid));
                                       },
                                       child: Container(
                                         padding: const EdgeInsets.all(2),
@@ -305,16 +344,52 @@ class _CreateGroupScreenState extends State<CreateGroupScreen> {
                   const Divider(color: AppTheme.borderColor),
                 ],
 
-                // Choose Members Title
-                const Text(
-                  'Add Participants',
-                  style: TextStyle(
-                    fontSize: 14,
-                    fontWeight: FontWeight.bold,
-                    color: AppTheme.textPrimary,
-                  ),
+                // Choose Members Title & Search Bar
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    const Text(
+                      'Select Participants',
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.bold,
+                        color: AppTheme.textPrimary,
+                      ),
+                    ),
+                    Text(
+                      '${_allUsers.length} available',
+                      style: const TextStyle(
+                        fontSize: 12,
+                        color: AppTheme.textSecondary,
+                      ),
+                    ),
+                  ],
                 ),
                 const SizedBox(height: 10),
+
+                // Search participants input
+                TextField(
+                  controller: _searchController,
+                  decoration: InputDecoration(
+                    hintText: 'Search people by name or email...',
+                    hintStyle:
+                        const TextStyle(fontSize: 13, color: AppTheme.textHint),
+                    prefixIcon: const Icon(Icons.search_rounded,
+                        color: AppTheme.textSecondary, size: 20),
+                    filled: true,
+                    fillColor: Colors.white,
+                    contentPadding: const EdgeInsets.symmetric(vertical: 10),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                      borderSide: const BorderSide(color: AppTheme.borderColor),
+                    ),
+                    enabledBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                      borderSide: const BorderSide(color: AppTheme.borderColor),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 12),
 
                 // User Checklist Container
                 Container(
@@ -331,26 +406,27 @@ class _CreateGroupScreenState extends State<CreateGroupScreen> {
                                 color: AppTheme.primaryColor),
                           ),
                         )
-                      : _availableUsers.isEmpty
+                      : _filteredUsers.isEmpty
                           ? const Padding(
                               padding: EdgeInsets.all(28),
                               child: Center(
                                 child: Text(
-                                  'No other registered users found.',
+                                  'No users match your search.',
                                   style: TextStyle(
-                                      color: AppTheme.textSecondary,
-                                      fontSize: 14),
+                                    color: AppTheme.textSecondary,
+                                    fontSize: 14,
+                                  ),
                                 ),
                               ),
                             )
                           : ListView.separated(
                               shrinkWrap: true,
                               physics: const NeverScrollableScrollPhysics(),
-                              itemCount: _availableUsers.length,
+                              itemCount: _filteredUsers.length,
                               separatorBuilder: (context, index) => const Divider(
                                   height: 1, color: AppTheme.borderColor),
                               itemBuilder: (context, index) {
-                                final user = _availableUsers[index];
+                                final user = _filteredUsers[index];
                                 final isSelected =
                                     _selectedUserIds.contains(user.uid);
 
@@ -421,4 +497,3 @@ class _CreateGroupScreenState extends State<CreateGroupScreen> {
     );
   }
 }
-

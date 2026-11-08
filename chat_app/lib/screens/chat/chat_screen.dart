@@ -4,6 +4,7 @@ import 'package:intl/intl.dart';
 import '../../models/chat_model.dart';
 import '../../models/user_model.dart';
 import '../../services/chat_service.dart';
+import '../../services/presence_service.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/presence_widgets.dart';
 
@@ -35,31 +36,13 @@ class _ChatScreenState extends State<ChatScreen> {
   final ChatService _chatService = ChatService();
   final currentUser = FirebaseAuth.instance.currentUser;
 
-  List<MessageModel> _messages = [];
-  bool _isLoading = true;
   bool _isSending = false;
-
-  @override
-  void initState() {
-    super.initState();
-    _fetchMessages();
-  }
 
   @override
   void dispose() {
     _messageController.dispose();
     _scrollController.dispose();
     super.dispose();
-  }
-
-  Future<void> _fetchMessages() async {
-    final list = await _chatService.getMessages(widget.chatId);
-    if (mounted) {
-      setState(() {
-        _messages = list;
-        _isLoading = false;
-      });
-    }
   }
 
   Future<void> _handleSendMessage() async {
@@ -69,27 +52,17 @@ class _ChatScreenState extends State<ChatScreen> {
     _messageController.clear();
     setState(() => _isSending = true);
 
-    // Optimistically add message locally
-    final optimisticMessage = MessageModel(
-      id: 'temp_${DateTime.now().millisecondsSinceEpoch}',
-      chatId: widget.chatId,
-      senderId: currentUser!.uid,
-      senderName: currentUser!.displayName ?? 'Me',
-      text: text,
-      timestamp: DateTime.now(),
-      isRead: false,
-    );
-
-    setState(() {
-      _messages.insert(0, optimisticMessage);
-    });
-
     try {
+      final senderName = currentUser!.displayName?.isNotEmpty == true
+          ? currentUser!.displayName!
+          : (currentUser!.email?.split('@').first ?? 'User');
+
       await _chatService.sendMessage(
         chatId: widget.chatId,
         senderId: currentUser!.uid,
-        senderName: currentUser!.displayName ?? 'User',
+        senderName: senderName,
         text: text,
+        isGroup: widget.isGroup,
       );
     } catch (e) {
       if (!mounted) return;
@@ -110,7 +83,7 @@ class _ChatScreenState extends State<ChatScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFFF1F5F9), // Soft chat background
+      backgroundColor: const Color(0xFFF1F5F9), // Soft modern chat background
       appBar: AppBar(
         titleSpacing: 0,
         backgroundColor: Colors.white,
@@ -118,78 +91,18 @@ class _ChatScreenState extends State<ChatScreen> {
           icon: const Icon(Icons.arrow_back_ios_new_rounded, size: 20),
           onPressed: () => Navigator.pop(context),
         ),
-        title: Row(
-          children: [
-            // Avatar
-            CircleAvatar(
-              radius: 19,
-              backgroundColor: AppTheme.primaryContainer,
-              backgroundImage: widget.photoUrl.isNotEmpty
-                  ? NetworkImage(widget.photoUrl)
-                  : null,
-              child: widget.photoUrl.isEmpty
-                  ? Text(
-                      widget.title.isNotEmpty
-                          ? widget.title[0].toUpperCase()
-                          : '?',
-                      style: const TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.bold,
-                        color: AppTheme.primaryColor,
-                      ),
-                    )
-                  : null,
-            ),
-            const SizedBox(width: 10),
-
-            // Title & Subtitle (Online/Offline or Group members)
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    widget.title,
-                    style: const TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.bold,
-                      color: AppTheme.textPrimary,
-                    ),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  if (widget.isGroup)
-                    Text(
-                      '${widget.memberCount} members',
-                      style: const TextStyle(
-                        fontSize: 12,
-                        color: AppTheme.textSecondary,
-                      ),
-                    )
-                  else if (widget.peerUser != null)
-                    UserLastSeenText(
-                      isOnline: widget.peerUser!.isOnline,
-                      lastSeen: widget.peerUser!.lastSeen,
-                    )
-                  else
-                    const Text(
-                      'Chat',
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: AppTheme.textSecondary,
-                      ),
-                    ),
-                ],
-              ),
-            ),
-          ],
-        ),
+        title: widget.isGroup
+            ? _buildGroupAppBarTitle()
+            : (widget.peerUser != null
+                ? _buildPeerStreamAppBarTitle(widget.peerUser!)
+                : _buildStaticAppBarTitle(widget.title, widget.photoUrl)),
         actions: [
           IconButton(
             icon: const Icon(Icons.call_outlined, color: AppTheme.primaryColor, size: 22),
             onPressed: () {
               ScaffoldMessenger.of(context).showSnackBar(
                 const SnackBar(
-                  content: Text('Audio call feature connected.'),
+                  content: Text('Audio call connected.'),
                   behavior: SnackBarBehavior.floating,
                 ),
               );
@@ -200,7 +113,7 @@ class _ChatScreenState extends State<ChatScreen> {
             onPressed: () {
               ScaffoldMessenger.of(context).showSnackBar(
                 const SnackBar(
-                  content: Text('Video call feature connected.'),
+                  content: Text('Video call connected.'),
                   behavior: SnackBarBehavior.floating,
                 ),
               );
@@ -211,32 +124,215 @@ class _ChatScreenState extends State<ChatScreen> {
       ),
       body: Column(
         children: [
-          // Message List
+          // Real-Time Message List Stream
           Expanded(
-            child: _isLoading
-                ? const Center(
+            child: StreamBuilder<List<MessageModel>>(
+              stream: _chatService.streamMessages(
+                widget.chatId,
+                isGroup: widget.isGroup,
+              ),
+              builder: (context, snapshot) {
+                if (snapshot.connectionState == ConnectionState.waiting &&
+                    !snapshot.hasData) {
+                  return const Center(
                     child: CircularProgressIndicator(color: AppTheme.primaryColor),
-                  )
-                : _messages.isEmpty
-                    ? _buildEmptyState()
-                    : ListView.builder(
-                        controller: _scrollController,
-                        reverse: true,
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 16, vertical: 14),
-                        itemCount: _messages.length,
-                        itemBuilder: (context, index) {
-                          final msg = _messages[index];
-                          final isMe = msg.senderId == currentUser?.uid;
-                          return _buildMessageBubble(msg, isMe);
-                        },
-                      ),
+                  );
+                }
+
+                if (snapshot.hasError) {
+                  return Center(
+                    child: Text(
+                      'Error loading messages: ${snapshot.error}',
+                      style: const TextStyle(color: AppTheme.errorColor),
+                    ),
+                  );
+                }
+
+                final messages = snapshot.data ?? [];
+                if (messages.isEmpty) {
+                  return _buildEmptyState();
+                }
+
+                return ListView.builder(
+                  controller: _scrollController,
+                  reverse: true, // Latest message appears at bottom
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                  itemCount: messages.length,
+                  itemBuilder: (context, index) {
+                    final msg = messages[index];
+                    final isMe = msg.senderId == currentUser?.uid;
+                    return _buildMessageBubble(msg, isMe);
+                  },
+                );
+              },
+            ),
           ),
 
           // Bottom Input Bar
           _buildInputBar(),
         ],
       ),
+    );
+  }
+
+  Widget _buildGroupAppBarTitle() {
+    return Row(
+      children: [
+        CircleAvatar(
+          radius: 19,
+          backgroundColor: AppTheme.primaryContainer,
+          backgroundImage:
+              widget.photoUrl.isNotEmpty ? NetworkImage(widget.photoUrl) : null,
+          child: widget.photoUrl.isEmpty
+              ? const Icon(
+                  Icons.group_rounded,
+                  color: AppTheme.primaryColor,
+                  size: 20,
+                )
+              : null,
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                widget.title,
+                style: const TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.bold,
+                  color: AppTheme.textPrimary,
+                ),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+              Text(
+                '${widget.memberCount} members',
+                style: const TextStyle(
+                  fontSize: 12,
+                  color: AppTheme.textSecondary,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildPeerStreamAppBarTitle(UserModel initialPeer) {
+    return StreamBuilder<UserModel?>(
+      stream: PresenceService().streamUser(initialPeer.uid),
+      initialData: initialPeer,
+      builder: (context, snapshot) {
+        final peer = snapshot.data ?? initialPeer;
+
+        return Row(
+          children: [
+            Stack(
+              children: [
+                CircleAvatar(
+                  radius: 19,
+                  backgroundColor: AppTheme.primaryContainer,
+                  backgroundImage: peer.photoUrl.isNotEmpty
+                      ? NetworkImage(peer.photoUrl)
+                      : null,
+                  child: peer.photoUrl.isEmpty
+                      ? Text(
+                          peer.name.isNotEmpty
+                              ? peer.name[0].toUpperCase()
+                              : '?',
+                          style: const TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
+                            color: AppTheme.primaryColor,
+                          ),
+                        )
+                      : null,
+                ),
+                Positioned(
+                  bottom: 0,
+                  right: 0,
+                  child: UserOnlineDot(
+                    isOnline: peer.isOnline,
+                    size: 10,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    peer.name,
+                    style: const TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold,
+                      color: AppTheme.textPrimary,
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  UserLastSeenText(
+                    isOnline: peer.isOnline,
+                    lastSeen: peer.lastSeen,
+                    lastSeenPrivacy: peer.lastSeenPrivacy,
+                  ),
+                ],
+              ),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  Widget _buildStaticAppBarTitle(String title, String photo) {
+    return Row(
+      children: [
+        CircleAvatar(
+          radius: 19,
+          backgroundColor: AppTheme.primaryContainer,
+          backgroundImage: photo.isNotEmpty ? NetworkImage(photo) : null,
+          child: photo.isEmpty
+              ? Text(
+                  title.isNotEmpty ? title[0].toUpperCase() : '?',
+                  style: const TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
+                    color: AppTheme.primaryColor,
+                  ),
+                )
+              : null,
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                title,
+                style: const TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.bold,
+                  color: AppTheme.textPrimary,
+                ),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+              const Text(
+                'Chat',
+                style: TextStyle(
+                  fontSize: 12,
+                  color: AppTheme.textSecondary,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
     );
   }
 
@@ -307,6 +403,19 @@ class _ChatScreenState extends State<ChatScreen> {
           crossAxisAlignment:
               isMe ? CrossAxisAlignment.end : CrossAxisAlignment.start,
           children: [
+            // Sender name in group chat
+            if (widget.isGroup && !isMe && msg.senderName.isNotEmpty) ...[
+              Text(
+                msg.senderName,
+                style: const TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.bold,
+                  color: AppTheme.primaryColor,
+                ),
+              ),
+              const SizedBox(height: 2),
+            ],
+
             // Text Message
             Text(
               msg.text,
@@ -410,14 +519,23 @@ class _ChatScreenState extends State<ChatScreen> {
               shape: const CircleBorder(),
               child: InkWell(
                 customBorder: const CircleBorder(),
-                onTap: _handleSendMessage,
-                child: const Padding(
-                  padding: EdgeInsets.all(12),
-                  child: Icon(
-                    Icons.send_rounded,
-                    color: Colors.white,
-                    size: 20,
-                  ),
+                onTap: _isSending ? null : _handleSendMessage,
+                child: Padding(
+                  padding: const EdgeInsets.all(12),
+                  child: _isSending
+                      ? const SizedBox(
+                          width: 20,
+                          height: 20,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: Colors.white,
+                          ),
+                        )
+                      : const Icon(
+                          Icons.send_rounded,
+                          color: Colors.white,
+                          size: 20,
+                        ),
                 ),
               ),
             ),
@@ -427,4 +545,3 @@ class _ChatScreenState extends State<ChatScreen> {
     );
   }
 }
-

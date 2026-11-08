@@ -76,7 +76,7 @@ class _MainDashboardState extends State<MainDashboard> {
 }
 
 // ============================================================================
-// 1. CHATS TAB (1-on-1 Chats)
+// 1. CHATS TAB (1-on-1 Chats with Real-Time Stream)
 // ============================================================================
 class ChatsTab extends StatefulWidget {
   const ChatsTab({super.key});
@@ -88,24 +88,35 @@ class ChatsTab extends StatefulWidget {
 class _ChatsTabState extends State<ChatsTab> {
   final ChatService _chatService = ChatService();
   final String _currentUid = FirebaseAuth.instance.currentUser?.uid ?? '';
-  List<ChatModel> _chats = [];
-  bool _isLoading = true;
 
-  @override
-  void initState() {
-    super.initState();
-    _loadChats();
-  }
+  Future<void> _startChatWithUser(UserModel peerUser) async {
+    final currentFirebaseUser = FirebaseAuth.instance.currentUser;
+    if (currentFirebaseUser == null) return;
 
-  Future<void> _loadChats() async {
-    if (_currentUid.isEmpty) return;
-    final list = await _chatService.getChats(_currentUid);
-    if (mounted) {
-      setState(() {
-        _chats = list;
-        _isLoading = false;
-      });
-    }
+    final currentUser = UserModel(
+      uid: currentFirebaseUser.uid,
+      name: currentFirebaseUser.displayName ?? 'User',
+      email: currentFirebaseUser.email ?? '',
+      photoUrl: currentFirebaseUser.photoURL ?? '',
+    );
+
+    final chat = await _chatService.getOrCreateChat(
+      currentUser: currentUser,
+      peerUser: peerUser,
+    );
+
+    if (!mounted) return;
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => ChatScreen(
+          chatId: chat.id,
+          title: peerUser.name,
+          photoUrl: peerUser.photoUrl,
+          peerUser: peerUser,
+        ),
+      ),
+    );
   }
 
   @override
@@ -166,128 +177,221 @@ class _ChatsTabState extends State<ChatsTab> {
         title: const Text('Chats'),
         actions: [
           IconButton(
-            tooltip: 'Search',
+            tooltip: 'Search & New Chat',
             icon: const Icon(Icons.search_rounded, color: AppTheme.textPrimary),
             onPressed: () => NewChatSheet.show(context),
           ),
         ],
       ),
-      body: RefreshIndicator(
-        color: AppTheme.primaryColor,
-        onRefresh: _loadChats,
-        child: _isLoading
-            ? const Center(
-                child: CircularProgressIndicator(color: AppTheme.primaryColor),
-              )
-            : _chats.isEmpty
-                ? _buildEmptyView()
-                : ListView.separated(
-                    padding: const EdgeInsets.symmetric(vertical: 8),
-                    itemCount: _chats.length,
-                    separatorBuilder: (context, index) =>
-                        const Divider(height: 1, indent: 76, color: AppTheme.borderColor),
-                    itemBuilder: (context, index) {
-                      final chat = _chats[index];
+      body: StreamBuilder<List<ChatModel>>(
+        stream: _chatService.streamChats(_currentUid),
+        builder: (context, chatSnapshot) {
+          if (chatSnapshot.connectionState == ConnectionState.waiting &&
+              !chatSnapshot.hasData) {
+            return const Center(
+              child: CircularProgressIndicator(color: AppTheme.primaryColor),
+            );
+          }
+
+          final chats = chatSnapshot.data ?? [];
+
+          return CustomScrollView(
+            physics: const AlwaysScrollableScrollPhysics(),
+            slivers: [
+              // Horizontal Registered Users Quick Bar
+              SliverToBoxAdapter(
+                child: _buildRegisteredUsersBar(),
+              ),
+
+              // Chat List Section Header
+              SliverToBoxAdapter(
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 12, 20, 6),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      const Text(
+                        'Recent Messages',
+                        style: TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.bold,
+                          color: AppTheme.textSecondary,
+                          letterSpacing: 0.3,
+                        ),
+                      ),
+                      if (chats.isNotEmpty)
+                        Text(
+                          '${chats.length}',
+                          style: const TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                            color: AppTheme.primaryColor,
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+              ),
+
+              // Chat List or Empty State
+              if (chats.isEmpty)
+                SliverFillRemaining(
+                  hasScrollBody: false,
+                  child: _buildEmptyView(),
+                )
+              else
+                SliverList(
+                  delegate: SliverChildBuilderDelegate(
+                    (context, index) {
+                      final chat = chats[index];
                       final peer = chat.getPeerDetails(_currentUid);
                       final peerName = peer['name'] ?? 'User';
                       final peerPhoto = peer['photoUrl'] ?? '';
+                      final peerUid = chat.participants.firstWhere(
+                        (p) => p != _currentUid,
+                        orElse: () => '',
+                      );
+                      final peerUser = UserModel(
+                        uid: peerUid,
+                        name: peerName,
+                        photoUrl: peerPhoto,
+                        email: peer['email'] ?? '',
+                      );
+
                       final timeStr = chat.lastMessageTime != null
                           ? DateFormat('h:mm a').format(chat.lastMessageTime!)
                           : '';
 
-                      return ListTile(
-                        contentPadding: const EdgeInsets.symmetric(
-                            horizontal: 20, vertical: 6),
-                        leading: CircleAvatar(
-                          radius: 26,
-                          backgroundColor: AppTheme.primaryContainer,
-                          backgroundImage: peerPhoto.isNotEmpty
-                              ? NetworkImage(peerPhoto)
-                              : null,
-                          child: peerPhoto.isEmpty
-                              ? Text(
-                                  peerName.isNotEmpty
-                                      ? peerName[0].toUpperCase()
-                                      : 'U',
-                                  style: const TextStyle(
-                                    fontWeight: FontWeight.bold,
-                                    fontSize: 18,
-                                    color: AppTheme.primaryColor,
+                      return Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          ListTile(
+                            contentPadding: const EdgeInsets.symmetric(
+                              horizontal: 20,
+                              vertical: 6,
+                            ),
+                            leading: Stack(
+                              children: [
+                                CircleAvatar(
+                                  radius: 26,
+                                  backgroundColor: AppTheme.primaryContainer,
+                                  backgroundImage: peerPhoto.isNotEmpty
+                                      ? NetworkImage(peerPhoto)
+                                      : null,
+                                  child: peerPhoto.isEmpty
+                                      ? Text(
+                                          peerName.isNotEmpty
+                                              ? peerName[0].toUpperCase()
+                                              : 'U',
+                                          style: const TextStyle(
+                                            fontWeight: FontWeight.bold,
+                                            fontSize: 18,
+                                            color: AppTheme.primaryColor,
+                                          ),
+                                        )
+                                      : null,
+                                ),
+                                if (peerUid.isNotEmpty)
+                                  Positioned(
+                                    bottom: 0,
+                                    right: 0,
+                                    child: StreamBuilder<UserModel?>(
+                                      stream: PresenceService().streamUser(peerUid),
+                                      builder: (context, userSnap) {
+                                        final isOnline =
+                                            userSnap.data?.isOnline ?? false;
+                                        return UserOnlineDot(
+                                          isOnline: isOnline,
+                                          size: 13,
+                                        );
+                                      },
+                                    ),
                                   ),
-                                )
-                              : null,
-                        ),
-                        title: Text(
-                          peerName,
-                          style: const TextStyle(
-                            fontWeight: FontWeight.bold,
-                            fontSize: 16,
-                            color: AppTheme.textPrimary,
-                          ),
-                        ),
-                        subtitle: Text(
-                          chat.lastMessage.isNotEmpty
-                              ? chat.lastMessage
-                              : 'Started a new conversation',
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                            fontSize: 13,
-                            color: chat.unreadCount > 0
-                                ? AppTheme.textPrimary
-                                : AppTheme.textSecondary,
-                            fontWeight: chat.unreadCount > 0
-                                ? FontWeight.w600
-                                : FontWeight.normal,
-                          ),
-                        ),
-                        trailing: Column(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          crossAxisAlignment: CrossAxisAlignment.end,
-                          children: [
-                            Text(
-                              timeStr,
+                              ],
+                            ),
+                            title: Text(
+                              peerName,
                               style: const TextStyle(
-                                fontSize: 12,
-                                color: AppTheme.textSecondary,
+                                fontWeight: FontWeight.bold,
+                                fontSize: 16,
+                                color: AppTheme.textPrimary,
                               ),
                             ),
-                            if (chat.unreadCount > 0) ...[
-                              const SizedBox(height: 4),
-                              Container(
-                                padding: const EdgeInsets.all(6),
-                                decoration: const BoxDecoration(
-                                  color: AppTheme.primaryColor,
-                                  shape: BoxShape.circle,
-                                ),
-                                child: Text(
-                                  '${chat.unreadCount}',
+                            subtitle: Text(
+                              chat.lastMessage.isNotEmpty
+                                  ? chat.lastMessage
+                                  : 'Started a new conversation',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                fontSize: 13,
+                                color: chat.unreadCount > 0
+                                    ? AppTheme.textPrimary
+                                    : AppTheme.textSecondary,
+                                fontWeight: chat.unreadCount > 0
+                                    ? FontWeight.w600
+                                    : FontWeight.normal,
+                              ),
+                            ),
+                            trailing: Column(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              crossAxisAlignment: CrossAxisAlignment.end,
+                              children: [
+                                Text(
+                                  timeStr,
                                   style: const TextStyle(
-                                    color: Colors.white,
-                                    fontSize: 10,
-                                    fontWeight: FontWeight.bold,
+                                    fontSize: 12,
+                                    color: AppTheme.textSecondary,
                                   ),
                                 ),
-                              ),
-                            ],
-                          ],
-                        ),
-                        onTap: () async {
-                          await Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (_) => ChatScreen(
-                                chatId: chat.id,
-                                title: peerName,
-                                photoUrl: peerPhoto,
-                              ),
+                                if (chat.unreadCount > 0) ...[
+                                  const SizedBox(height: 4),
+                                  Container(
+                                    padding: const EdgeInsets.all(6),
+                                    decoration: const BoxDecoration(
+                                      color: AppTheme.primaryColor,
+                                      shape: BoxShape.circle,
+                                    ),
+                                    child: Text(
+                                      '${chat.unreadCount}',
+                                      style: const TextStyle(
+                                        color: Colors.white,
+                                        fontSize: 10,
+                                        fontWeight: FontWeight.bold,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ],
                             ),
-                          );
-                          _loadChats();
-                        },
+                            onTap: () {
+                              Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (_) => ChatScreen(
+                                    chatId: chat.id,
+                                    title: peerName,
+                                    photoUrl: peerPhoto,
+                                    peerUser: peerUser,
+                                  ),
+                                ),
+                              );
+                            },
+                          ),
+                          const Divider(
+                            height: 1,
+                            indent: 76,
+                            color: AppTheme.borderColor,
+                          ),
+                        ],
                       );
                     },
+                    childCount: chats.length,
                   ),
+                ),
+            ],
+          );
+        },
       ),
       floatingActionButton: FloatingActionButton.extended(
         backgroundColor: AppTheme.primaryColor,
@@ -299,18 +403,126 @@ class _ChatsTabState extends State<ChatsTab> {
           'New Chat',
           style: TextStyle(fontWeight: FontWeight.bold),
         ),
-        onPressed: () async {
-          await NewChatSheet.show(context);
-          _loadChats();
-        },
+        onPressed: () => NewChatSheet.show(context),
       ),
+    );
+  }
+
+  Widget _buildRegisteredUsersBar() {
+    return StreamBuilder<List<UserModel>>(
+      stream: _chatService.streamAllUsers(_currentUid),
+      builder: (context, snapshot) {
+        final users = snapshot.data ?? [];
+        if (users.isEmpty) return const SizedBox.shrink();
+
+        return Container(
+          margin: const EdgeInsets.symmetric(vertical: 8),
+          height: 104,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 20),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    const Text(
+                      'Contacts',
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.bold,
+                        color: AppTheme.textSecondary,
+                        letterSpacing: 0.3,
+                      ),
+                    ),
+                    Text(
+                      '${users.length}',
+                      style: const TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                        color: AppTheme.primaryColor,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 8),
+              Expanded(
+                child: ListView.separated(
+                  scrollDirection: Axis.horizontal,
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  itemCount: users.length,
+                  separatorBuilder: (context, index) =>
+                      const SizedBox(width: 14),
+                  itemBuilder: (context, index) {
+                    final user = users[index];
+                    return GestureDetector(
+                      onTap: () => _startChatWithUser(user),
+                      child: SizedBox(
+                        width: 64,
+                        child: Column(
+                          children: [
+                            Stack(
+                              children: [
+                                CircleAvatar(
+                                  radius: 24,
+                                  backgroundColor: AppTheme.primaryContainer,
+                                  backgroundImage: user.photoUrl.isNotEmpty
+                                      ? NetworkImage(user.photoUrl)
+                                      : null,
+                                  child: user.photoUrl.isEmpty
+                                      ? Text(
+                                          user.name.isNotEmpty
+                                              ? user.name[0].toUpperCase()
+                                              : 'U',
+                                          style: const TextStyle(
+                                            fontWeight: FontWeight.bold,
+                                            fontSize: 16,
+                                            color: AppTheme.primaryColor,
+                                          ),
+                                        )
+                                      : null,
+                                ),
+                                Positioned(
+                                  bottom: 0,
+                                  right: 0,
+                                  child: UserOnlineDot(
+                                    isOnline: user.isOnline,
+                                    size: 12,
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              user.name.split(' ').first,
+                              style: const TextStyle(
+                                fontSize: 11,
+                                fontWeight: FontWeight.w500,
+                                color: AppTheme.textPrimary,
+                              ),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              textAlign: TextAlign.center,
+                            ),
+                          ],
+                        ),
+                      ),
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
+        );
+      },
     );
   }
 
   Widget _buildEmptyView() {
     return Center(
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 32),
+        padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 40),
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
@@ -322,7 +534,7 @@ class _ChatsTabState extends State<ChatsTab> {
               ),
               child: const Icon(
                 Icons.forum_outlined,
-                size: 50,
+                size: 48,
                 color: AppTheme.primaryColor,
               ),
             ),
@@ -337,7 +549,7 @@ class _ChatsTabState extends State<ChatsTab> {
             ),
             const SizedBox(height: 8),
             const Text(
-              'Connect with friends and colleagues by starting your first chat.',
+              'Pick a contact above or tap "New Chat" to start messaging in real time.',
               textAlign: TextAlign.center,
               style: TextStyle(fontSize: 14, color: AppTheme.textSecondary),
             ),
@@ -349,40 +561,16 @@ class _ChatsTabState extends State<ChatsTab> {
 }
 
 // ============================================================================
-// 2. GROUPS TAB
+// 2. GROUPS TAB (Real-Time Stream)
 // ============================================================================
-class GroupsTab extends StatefulWidget {
+class GroupsTab extends StatelessWidget {
   const GroupsTab({super.key});
 
   @override
-  State<GroupsTab> createState() => _GroupsTabState();
-}
-
-class _GroupsTabState extends State<GroupsTab> {
-  final ChatService _chatService = ChatService();
-  final String _currentUid = FirebaseAuth.instance.currentUser?.uid ?? '';
-  List<GroupModel> _groups = [];
-  bool _isLoading = true;
-
-  @override
-  void initState() {
-    super.initState();
-    _loadGroups();
-  }
-
-  Future<void> _loadGroups() async {
-    if (_currentUid.isEmpty) return;
-    final list = await _chatService.getGroups(_currentUid);
-    if (mounted) {
-      setState(() {
-        _groups = list;
-        _isLoading = false;
-      });
-    }
-  }
-
-  @override
   Widget build(BuildContext context) {
+    final chatService = ChatService();
+    final currentUid = FirebaseAuth.instance.currentUser?.uid ?? '';
+
     return Scaffold(
       backgroundColor: AppTheme.backgroundColor,
       appBar: AppBar(
@@ -391,119 +579,129 @@ class _GroupsTabState extends State<GroupsTab> {
           IconButton(
             tooltip: 'Create Group',
             icon: const Icon(Icons.group_add_outlined, color: AppTheme.textPrimary),
-            onPressed: () async {
-              final created = await Navigator.push(
+            onPressed: () {
+              Navigator.push(
                 context,
                 MaterialPageRoute(builder: (_) => const CreateGroupScreen()),
               );
-              if (created == true) _loadGroups();
             },
           ),
         ],
       ),
-      body: RefreshIndicator(
-        color: AppTheme.primaryColor,
-        onRefresh: _loadGroups,
-        child: _isLoading
-            ? const Center(
-                child: CircularProgressIndicator(color: AppTheme.primaryColor),
-              )
-            : _groups.isEmpty
-                ? _buildEmptyView()
-                : ListView.separated(
-                    padding: const EdgeInsets.symmetric(vertical: 8),
-                    itemCount: _groups.length,
-                    separatorBuilder: (context, index) =>
-                        const Divider(height: 1, indent: 76, color: AppTheme.borderColor),
-                    itemBuilder: (context, index) {
-                      final group = _groups[index];
-                      final timeStr = group.lastMessageTime != null
-                          ? DateFormat('h:mm a').format(group.lastMessageTime!)
-                          : '';
+      body: StreamBuilder<List<GroupModel>>(
+        stream: chatService.streamGroups(currentUid),
+        builder: (context, snapshot) {
+          if (snapshot.connectionState == ConnectionState.waiting &&
+              !snapshot.hasData) {
+            return const Center(
+              child: CircularProgressIndicator(color: AppTheme.primaryColor),
+            );
+          }
 
-                      return ListTile(
-                        contentPadding: const EdgeInsets.symmetric(
-                            horizontal: 20, vertical: 6),
-                        leading: CircleAvatar(
-                          radius: 26,
-                          backgroundColor: AppTheme.primaryContainer,
-                          backgroundImage: group.iconUrl.isNotEmpty
-                              ? NetworkImage(group.iconUrl)
-                              : null,
-                          child: group.iconUrl.isEmpty
-                              ? const Icon(
-                                  Icons.group_rounded,
-                                  color: AppTheme.primaryColor,
-                                  size: 26,
-                                )
-                              : null,
+          final groups = snapshot.data ?? [];
+
+          if (groups.isEmpty) {
+            return _buildEmptyView(context);
+          }
+
+          return ListView.separated(
+            padding: const EdgeInsets.symmetric(vertical: 8),
+            itemCount: groups.length,
+            separatorBuilder: (context, index) =>
+                const Divider(height: 1, indent: 76, color: AppTheme.borderColor),
+            itemBuilder: (context, index) {
+              final group = groups[index];
+              final timeStr = group.lastMessageTime != null
+                  ? DateFormat('h:mm a').format(group.lastMessageTime!)
+                  : '';
+
+              return ListTile(
+                contentPadding: const EdgeInsets.symmetric(
+                  horizontal: 20,
+                  vertical: 6,
+                ),
+                leading: CircleAvatar(
+                  radius: 26,
+                  backgroundColor: AppTheme.primaryContainer,
+                  backgroundImage: group.iconUrl.isNotEmpty
+                      ? NetworkImage(group.iconUrl)
+                      : null,
+                  child: group.iconUrl.isEmpty
+                      ? const Icon(
+                          Icons.group_rounded,
+                          color: AppTheme.primaryColor,
+                          size: 26,
+                        )
+                      : null,
+                ),
+                title: Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        group.name,
+                        style: const TextStyle(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 16,
+                          color: AppTheme.textPrimary,
                         ),
-                        title: Row(
-                          children: [
-                            Expanded(
-                              child: Text(
-                                group.name,
-                                style: const TextStyle(
-                                  fontWeight: FontWeight.bold,
-                                  fontSize: 16,
-                                  color: AppTheme.textPrimary,
-                                ),
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                            ),
-                            Container(
-                              padding: const EdgeInsets.symmetric(
-                                  horizontal: 6, vertical: 2),
-                              decoration: BoxDecoration(
-                                color: AppTheme.primaryContainer,
-                                borderRadius: BorderRadius.circular(10),
-                              ),
-                              child: Text(
-                                '${group.members.length}',
-                                style: const TextStyle(
-                                  fontSize: 11,
-                                  color: AppTheme.primaryColor,
-                                  fontWeight: FontWeight.bold,
-                                ),
-                              ),
-                            ),
-                          ],
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 7,
+                        vertical: 2,
+                      ),
+                      decoration: BoxDecoration(
+                        color: AppTheme.primaryContainer,
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: Text(
+                        '${group.members.length}',
+                        style: const TextStyle(
+                          fontSize: 11,
+                          color: AppTheme.primaryColor,
+                          fontWeight: FontWeight.bold,
                         ),
-                        subtitle: Text(
-                          group.lastMessage,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
-                            fontSize: 13,
-                            color: AppTheme.textSecondary,
-                          ),
-                        ),
-                        trailing: Text(
-                          timeStr,
-                          style: const TextStyle(
-                            fontSize: 12,
-                            color: AppTheme.textSecondary,
-                          ),
-                        ),
-                        onTap: () async {
-                          await Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (_) => ChatScreen(
-                                chatId: group.id,
-                                title: group.name,
-                                photoUrl: group.iconUrl,
-                                isGroup: true,
-                                memberCount: group.members.length,
-                              ),
-                            ),
-                          );
-                          _loadGroups();
-                        },
-                      );
-                    },
+                      ),
+                    ),
+                  ],
+                ),
+                subtitle: Text(
+                  group.lastMessage,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    fontSize: 13,
+                    color: AppTheme.textSecondary,
                   ),
+                ),
+                trailing: Text(
+                  timeStr,
+                  style: const TextStyle(
+                    fontSize: 12,
+                    color: AppTheme.textSecondary,
+                  ),
+                ),
+                onTap: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => ChatScreen(
+                        chatId: group.id,
+                        title: group.name,
+                        photoUrl: group.iconUrl,
+                        isGroup: true,
+                        memberCount: group.members.length,
+                      ),
+                    ),
+                  );
+                },
+              );
+            },
+          );
+        },
       ),
       floatingActionButton: FloatingActionButton.extended(
         backgroundColor: AppTheme.primaryColor,
@@ -515,18 +713,17 @@ class _GroupsTabState extends State<GroupsTab> {
           'New Group',
           style: TextStyle(fontWeight: FontWeight.bold),
         ),
-        onPressed: () async {
-          final created = await Navigator.push(
+        onPressed: () {
+          Navigator.push(
             context,
             MaterialPageRoute(builder: (_) => const CreateGroupScreen()),
           );
-          if (created == true) _loadGroups();
         },
       ),
     );
   }
 
-  Widget _buildEmptyView() {
+  Widget _buildEmptyView(BuildContext context) {
     return Center(
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 32),
@@ -540,7 +737,7 @@ class _GroupsTabState extends State<GroupsTab> {
                 shape: BoxShape.circle,
               ),
               child: const Icon(
-                Icons.groups_3_outlined,
+                Icons.groups_outlined,
                 size: 50,
                 color: AppTheme.primaryColor,
               ),
@@ -556,9 +753,27 @@ class _GroupsTabState extends State<GroupsTab> {
             ),
             const SizedBox(height: 8),
             const Text(
-              'Create a group to plan, discuss, and stay in touch with everyone together.',
+              'Create a group to chat with multiple teammates and friends together.',
               textAlign: TextAlign.center,
               style: TextStyle(fontSize: 14, color: AppTheme.textSecondary),
+            ),
+            const SizedBox(height: 20),
+            ElevatedButton.icon(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppTheme.primaryColor,
+                foregroundColor: Colors.white,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+              ),
+              icon: const Icon(Icons.group_add_rounded, size: 18),
+              label: const Text('Create a Group'),
+              onPressed: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => const CreateGroupScreen()),
+                );
+              },
             ),
           ],
         ),

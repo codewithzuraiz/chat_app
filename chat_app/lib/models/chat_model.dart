@@ -150,11 +150,11 @@ class GroupModel {
 
     return GroupModel(
       id: doc.id,
-      name: data['name'] as String? ?? 'Group',
+      name: data['groupName'] as String? ?? data['name'] as String? ?? 'Group',
       description: data['description'] as String? ?? '',
-      iconUrl: data['iconUrl'] as String? ?? '',
+      iconUrl: data['groupIcon'] as String? ?? data['iconUrl'] as String? ?? '',
       createdBy: data['createdBy'] as String? ?? '',
-      adminIds: List<String>.from(data['adminIds'] ?? []),
+      adminIds: List<String>.from(data['adminUids'] ?? data['adminIds'] ?? []),
       members: List<String>.from(data['members'] ?? []),
       lastMessage: data['lastMessage'] as String? ?? 'Group created',
       lastMessageTime: parsedLastTime,

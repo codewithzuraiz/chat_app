@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import '../../models/user_model.dart';
@@ -29,30 +30,33 @@ class _NewChatSheetState extends State<NewChatSheet> {
   List<UserModel> _allUsers = [];
   List<UserModel> _filteredUsers = [];
   bool _isLoading = true;
+  StreamSubscription? _usersSub;
 
   @override
   void initState() {
     super.initState();
-    _fetchUsers();
+    _subscribeUsers();
     _searchController.addListener(_filter);
   }
 
   @override
   void dispose() {
+    _usersSub?.cancel();
     _searchController.dispose();
     super.dispose();
   }
 
-  Future<void> _fetchUsers() async {
+  void _subscribeUsers() {
     final currentUid = FirebaseAuth.instance.currentUser?.uid ?? '';
-    final users = await _chatService.getAllUsers(currentUid);
-    if (mounted) {
-      setState(() {
-        _allUsers = users;
-        _filteredUsers = users;
-        _isLoading = false;
-      });
-    }
+    _usersSub = _chatService.streamAllUsers(currentUid).listen((users) {
+      if (mounted) {
+        setState(() {
+          _allUsers = users;
+          _filter();
+          _isLoading = false;
+        });
+      }
+    });
   }
 
   void _filter() {
