@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../../services/auth_service.dart';
 import '../../theme/app_theme.dart';
+import 'forgot_password_screen.dart';
 import 'signup_screen.dart';
 import 'widgets/custom_text_field.dart';
 import 'widgets/phone_number_dialog.dart';
@@ -77,68 +78,12 @@ class _LoginScreenState extends State<LoginScreen> {
   }
 
   void _handleForgotPassword() {
-    final emailController = TextEditingController(text: _emailController.text.trim());
-    showDialog(
-      context: context,
-      builder: (dialogCtx) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: AppTheme.borderRadius),
-        backgroundColor: Colors.white,
-        title: const Text(
-          'Reset Password',
-          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => ForgotPasswordScreen(
+          initialEmail: _emailController.text.trim(),
         ),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text(
-              'Enter your email address to receive a password reset link.',
-              style: TextStyle(fontSize: 14, color: AppTheme.textSecondary),
-            ),
-            const SizedBox(height: 16),
-            CustomTextField(
-              controller: emailController,
-              label: 'Email Address',
-              hint: 'name@example.com',
-              keyboardType: TextInputType.emailAddress,
-              prefixIcon: Icons.email_outlined,
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dialogCtx),
-            child: const Text('Cancel', style: TextStyle(color: AppTheme.textSecondary)),
-          ),
-          ElevatedButton(
-            onPressed: () async {
-              final email = emailController.text.trim();
-              if (email.isEmpty) return;
-              Navigator.pop(dialogCtx);
-              try {
-                await _authService.sendPasswordResetEmail(email);
-                if (!mounted) return;
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                    content: const Text('Password reset link sent to your email.'),
-                    backgroundColor: AppTheme.primaryColor,
-                    behavior: SnackBarBehavior.floating,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                  ),
-                );
-              } catch (e) {
-                if (!mounted) return;
-                _showErrorSnackBar(AuthService.getReadableErrorMessage(e));
-              }
-            },
-            style: ElevatedButton.styleFrom(
-              backgroundColor: AppTheme.primaryColor,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-              minimumSize: const Size(100, 42),
-            ),
-            child: const Text('Send Link'),
-          ),
-        ],
       ),
     );
   }
