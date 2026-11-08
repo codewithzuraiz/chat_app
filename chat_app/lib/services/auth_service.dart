@@ -1,10 +1,20 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
+import 'package:google_sign_in/google_sign_in.dart';
 
 class AuthService {
   final FirebaseAuth _auth = FirebaseAuth.instance;
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+
+  // Web Client ID from google-services.json oauth_client type 3
+  static const String _webClientId =
+      '456732466987-im6n75po4rff64pmmrvsi8veb6p34upc.apps.googleusercontent.com';
+
+  final GoogleSignIn _googleSignIn = GoogleSignIn(
+    serverClientId: _webClientId,
+    scopes: ['email', 'profile'],
+  );
 
   // Auth State Stream
   Stream<User?> get authStateChanges => _auth.authStateChanges();
@@ -82,22 +92,38 @@ class AuthService {
     }
   }
 
-  /// Google Sign-In helper structure using GoogleAuthProvider
+  /// Google Sign-In with native GoogleSignIn and Firebase Credential
   Future<UserCredential?> signInWithGoogle() async {
     try {
-      final googleProvider = GoogleAuthProvider();
-      googleProvider.addScope('email');
-      googleProvider.addScope('profile');
-
-      UserCredential credential;
       if (kIsWeb) {
-        credential = await _auth.signInWithPopup(googleProvider);
+        final googleProvider = GoogleAuthProvider();
+        googleProvider.addScope('email');
+        googleProvider.addScope('profile');
+        final credential = await _auth.signInWithPopup(googleProvider);
+        await _saveUserToFirestore(credential.user);
+        return credential;
       } else {
-        credential = await _auth.signInWithProvider(googleProvider);
-      }
+        // Ensure account chooser is displayed
+        await _googleSignIn.signOut().catchError((_) => null);
 
-      await _saveUserToFirestore(credential.user);
-      return credential;
+        final GoogleSignInAccount? googleUser = await _googleSignIn.signIn();
+        if (googleUser == null) {
+          // User canceled
+          return null;
+        }
+
+        final GoogleSignInAuthentication googleAuth =
+            await googleUser.authentication;
+
+        final AuthCredential credential = GoogleAuthProvider.credential(
+          accessToken: googleAuth.accessToken,
+          idToken: googleAuth.idToken,
+        );
+
+        final userCredential = await _auth.signInWithCredential(credential);
+        await _saveUserToFirestore(userCredential.user);
+        return userCredential;
+      }
     } on FirebaseAuthException {
       rethrow;
     } catch (e) {
@@ -173,7 +199,14 @@ class AuthService {
 
   /// Sign Out
   Future<void> signOut() async {
-    await _auth.signOut();
+    try {
+      await Future.wait([
+        _auth.signOut(),
+        _googleSignIn.signOut(),
+      ]);
+    } catch (_) {
+      await _auth.signOut();
+    }
   }
 
   /// Helper to store / sync user profile in Firestore

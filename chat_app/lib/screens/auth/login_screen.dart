@@ -2,9 +2,9 @@ import 'package:flutter/material.dart';
 import '../../services/auth_service.dart';
 import '../../theme/app_theme.dart';
 import 'forgot_password_screen.dart';
+import 'phone_login_screen.dart';
 import 'signup_screen.dart';
 import 'widgets/custom_text_field.dart';
-import 'widgets/phone_number_dialog.dart';
 import 'widgets/primary_button.dart';
 import 'widgets/social_auth_button.dart';
 
@@ -74,7 +74,10 @@ class _LoginScreenState extends State<LoginScreen> {
   }
 
   void _handlePhoneLogin() {
-    PhoneNumberBottomSheet.show(context);
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => const PhoneLoginScreen()),
+    );
   }
 
   void _handleForgotPassword() {

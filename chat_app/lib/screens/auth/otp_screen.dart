@@ -151,7 +151,7 @@ class _OtpScreenState extends State<OtpScreen> {
           color: AppTheme.textPrimary,
         ),
         inputFormatters: [
-          LengthLimitingTextInputFormatter(1),
+          LengthLimitingTextInputFormatter(6),
           FilteringTextInputFormatter.digitsOnly,
         ],
         decoration: InputDecoration(
@@ -175,6 +175,24 @@ class _OtpScreenState extends State<OtpScreen> {
           ),
         ),
         onChanged: (value) {
+          if (value.length > 1) {
+            // User pasted multi-digit code
+            final digits = value.replaceAll(RegExp(r'\D'), '');
+            for (int i = 0; i < _otpLength; i++) {
+              if (i < digits.length) {
+                _controllers[i].text = digits[i];
+              }
+            }
+            final lastIndex = digits.length >= _otpLength ? _otpLength - 1 : digits.length;
+            _focusNodes[lastIndex].requestFocus();
+            if (digits.length >= _otpLength) {
+              _focusNodes[lastIndex].unfocus();
+              _handleVerify();
+            }
+            setState(() {});
+            return;
+          }
+
           if (value.isNotEmpty) {
             if (index < _otpLength - 1) {
               _focusNodes[index + 1].requestFocus();
