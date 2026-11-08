@@ -12,6 +12,7 @@ import '../auth/auth_gate.dart';
 import '../chat/chat_screen.dart';
 import '../chat/new_chat_dialog.dart';
 import '../groups/create_group_screen.dart';
+import '../orvex/orvex_account_screen.dart';
 import '../profile/edit_profile_screen.dart';
 import '../settings/privacy_settings_screen.dart';
 
@@ -112,6 +113,56 @@ class _ChatsTabState extends State<ChatsTab> {
     return Scaffold(
       backgroundColor: AppTheme.backgroundColor,
       appBar: AppBar(
+        leading: Padding(
+          padding: const EdgeInsets.only(left: 12),
+          child: Center(
+            child: Tooltip(
+              message: 'Orvex Tech Solutions',
+              child: InkWell(
+                onTap: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => const OrvexAccountScreen(),
+                    ),
+                  );
+                },
+                borderRadius: BorderRadius.circular(20),
+                child: Container(
+                  width: 38,
+                  height: 38,
+                  decoration: BoxDecoration(
+                    gradient: const LinearGradient(
+                      colors: [Color(0xFF1B5E20), Color(0xFF2E7D32)],
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                    ),
+                    shape: BoxShape.circle,
+                    boxShadow: [
+                      BoxShadow(
+                        color: AppTheme.primaryColor.withValues(alpha: 0.35),
+                        blurRadius: 8,
+                        offset: const Offset(0, 2),
+                      ),
+                    ],
+                    border: Border.all(color: Colors.white, width: 1.5),
+                  ),
+                  child: const Center(
+                    child: Text(
+                      'O',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 19,
+                        fontWeight: FontWeight.w900,
+                        letterSpacing: 0.5,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
         title: const Text('Chats'),
         actions: [
           IconButton(
